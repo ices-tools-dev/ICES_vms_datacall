@@ -1,0 +1,582 @@
+---
+title: "Logbook QC"
+author: "Einar Hjörleifsson"
+date: "06/04/2020"
+output: 
+  html_document: 
+    fig_height: 6
+    fig_width: 9
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+
+```{r}
+library(knitr)
+library(vmstools)
+library(RColorBrewer)
+library(rnaturalearth)
+library(sf)
+library(tidyverse)
+```
+
+```{r}
+my_png <- function(file, width, height) {
+  png(file, width = width, height = height, 
+      res = 800, units = "in", pointsize = 20)
+}
+```
+
+```{r load-data}
+land <- 
+  ne_countries("medium", returnclass = "sf") %>% 
+  select(admin) %>% 
+  st_crop(xmin = -70,
+          xmax = 90,
+          ymin = 30,
+          ymax = 85)
+```
+
+```{r}
+ICES_LE <- 
+  read_csv('delivery/ICES_LE_ISL.csv')
+```
+
+
+```{r logbook-checks}
+ICES_LE <- 
+  cbind(ICES_LE, vmstools::ICESrectangle2LonLat(ICES_LE$ICES_rectangle, midpoint=TRUE)) %>% 
+  as_tibble()
+spatBoundLog <- list(xrange = range(ICES_LE$SI_LONG, na.rm=TRUE),
+                     yrange = range(ICES_LE$SI_LATI, na.rm=TRUE))
+spatCoreLog  <- list(xrange = quantile(ICES_LE$SI_LONG, c(0.025, 0.975), na.rm=TRUE),
+                     yrange = quantile(ICES_LE$SI_LATI, c(0.025, 0.975), na.rm=TRUE))
+tempBoundLog <- range(ICES_LE$year, na.rm=TRUE)
+```
+
+```{r utilities}
+source("2019_VMS_ICES-QC/utilities_report.R")
+```
+
+
+## Years & number of records for which data has been submitted:
+
+```{r}
+d <- 
+  ICES_LE %>% 
+  dplyr::count(year) 
+
+d %>% 
+  knitr::kable()
+
+d %>% 
+  ggplot(aes(year, n)) +
+  geom_point() +
+  geom_line() +
+  labs(subtitle = "Logbooks:: Number of annual records",
+       x = NULL, y = NULL) +
+  scale_x_continuous(breaks = 2000:2030)
+```
+
+
+## Records assigned to invalid Statistical Rectangles
+
+```{r invalid stat-sqrs-le}
+if(any(is.na(ICES_LE$SI_LONG))) {
+  
+  knitr::kable(table(`ICES Rectangle` = ICES_LE$ICES_rectangle[is.na(ICES_LE$SI_LONG)],
+                     Year = ICES_LE$year[is.na(ICES_LE$SI_LONG)]), booktabs = TRUE)
+  
+} else {
+  
+  x <- "There were no invalid Statistical Rectangles reported"
+  attr(x, "format") <- "markdown"
+  attr(x, "class") <- "knit_asis"
+  x
+}
+```
+
+## Distribution of logbook entries by month:
+
+```{r logbook-entries-month, results='asis'}
+d <- 
+  ICES_LE %>% 
+  count(month, year)
+d %>% 
+  spread(year, n) %>% 
+  kable()
+
+d %>% 
+  ggplot(aes(year, n)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~ month) +
+  scale_x_continuous(breaks = 2000:2030) +
+  labs(subtitle = "Logbooks: Number of records by months and years",
+       x = NULL, y = NULL)
+```
+
+
+## Area extent of data submitted by year:
+
+```{r , results='asis', fig.height = 9}
+if (any(!is.na(ICES_LE$SI_LONG))) {
+  ICES_LE %>% 
+    group_by(year) %>% 
+    summarise(across(c("SI_LONG", "SI_LATI"), list(min = min, max = max))) %>% 
+    kable()
+} else {
+  x <- "There were no valid Statistical Rectangles reported"
+  attr(x, "format") <- "markdown"
+  attr(x, "class") <- "knit_asis"
+  x
+}
+```
+
+## Area for which data has been submitted:
+
+```{r , results='asis', fig.height = 9}
+if (any(!is.na(ICES_LE$SI_LONG))) {
+  p <- 
+    ICES_LE %>% 
+    select(year, lon = SI_LONG, lat = SI_LATI) %>% 
+    distinct() %>% 
+    ggplot() +
+    theme_minimal() +
+    geom_sf(data = land, fill = "grey", colour = "grey") +
+    geom_tile(aes(lon, lat), fill = "red3") +
+    facet_wrap(~ year) +
+    labs(subtitle = "Area for which data has been submitted",
+         x = NULL, y = NULL)
+  p +
+    coord_sf(xlim = spatBoundLog$xrange,
+             ylim = spatBoundLog$yrange)
+} else {
+  x <- "There were no valid Statistical Rectangles reported"
+  attr(x, "format") <- "markdown"
+  attr(x, "class") <- "knit_asis"
+  x
+}
+```
+
+
+
+```{r , results='asis',fig.height = 9}
+if (any(!is.na(ICES_LE$SI_LONG))) {
+  p +
+    coord_sf(xlim = spatCoreLog$xrange,
+             ylim = spatCoreLog$yrange)
+} else {
+  x <- "There were no valid Statistical Rectangles reported"
+  attr(x, "format") <- "markdown"
+  attr(x, "class") <- "knit_asis"
+  x
+}
+```
+
+\newpage
+
+## Frequency of unique vessel counts by year:
+
+```{r records-by-unique-vessels-le}
+if (any(!is.na(ICES_LE$UniqueVessels))) {
+  
+  d <- 
+    ICES_LE %>% 
+    count(year, UniqueVessels) 
+  d %>% 
+    spread(year, n, fill = 0) %>% 
+    slice(1:50) %>% 
+    kable()
+  
+  d %>% 
+    ggplot(aes(UniqueVessels, n, colour = as.factor(year))) +
+    geom_line() +
+    scale_y_continuous(trans = "log10") +
+    labs(subtitle = "Frequency of unique vessels",
+         x = "Unique vessel count",
+         y = "Number of records")
+  
+} else {
+  x <- "There were no unique vessel counts provided"
+  attr(x, "format") <- "markdown"
+  attr(x, "class") <- "knit_asis"
+  x
+}
+```
+
+## Frequency of vessel length categories by year:
+
+```{r , results='asis'}
+d <- 
+  ICES_LE %>% 
+  rename(vessel_length = vessel_length_category) %>% 
+  count(vessel_length, year)
+d %>% 
+  spread(year, n) %>% 
+  kable()
+
+d %>% 
+  ggplot(aes(year, n)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~ vessel_length, scale = "free_y") +
+  labs(subtitle = "Frequency of vessel length categories by year",
+       x = NULL, y = "Number of records")
+```
+
+
+
+## Frequency of gear codes by year:
+
+```{r , results='asis'}
+d <- 
+  ICES_LE %>% 
+  count(year, gear_code)
+
+d %>% 
+  spread(year, n, fill = 0) %>% 
+  kable()
+
+d %>% 
+  ggplot(aes(year, n)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~ gear_code, scale = "free_y") +
+  labs(subtitle = "Frequency of gear codes by year",
+       x = NULL, y = "Number of records") +
+  scale_x_continuous(breaks = 2000:2030)
+```
+
+## Number of unique DCF Level 6 codes by year:
+
+```{r , results='asis'}
+ICES_LE %>% 
+  group_by(year) %>% 
+  summarise(n = n_distinct(LE_MET_level6)) %>% 
+  kable()
+```
+
+## Top 5 DCF Level 6 codes by year:
+
+```{r , results='asis'}
+top <- 
+  ICES_LE %>% 
+  count(LE_MET_level6) %>% 
+  arrange(-n) %>% 
+  slice(1:12) %>% 
+  pull(LE_MET_level6)
+d <- 
+  ICES_LE %>% 
+  filter(LE_MET_level6 %in% top) %>% 
+  count(year, LE_MET_level6)
+d %>% 
+  spread(year, n) %>% 
+  kable()
+d %>% 
+  ggplot(aes(year, n)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~ LE_MET_level6, scale = "free_y") +
+  scale_x_continuous(breaks = 2000:2030) +
+  labs(subtitle = "Top 12 DCF Level 6 codes by year",
+       x = NULL, y = "Number of records")
+```
+
+
+
+## Frequency of VMS enabled category
+
+```{r , results='asis'}
+kable(table(ICES_LE$vms_enabled,ICES_LE$vessel_length_category), booktabs = TRUE)
+```
+
+
+
+## Average fishing days:
+```{r , results='asis'}
+ICES_LE %>% 
+  ggplot(aes(fishing_days)) +
+  geom_histogram() +
+  scale_x_continuous(trans = "log10") +
+  facet_wrap(~ year) +
+  labs(subtitle = "Logbooks: Frequency distirbution of fishing days by year",
+       x = "Fishing days",
+       y = NULL)
+```
+
+
+
+
+## Average KW-hours:
+```{r , results='asis'}
+ICES_LE %>% 
+  ggplot(aes(kw_fishing_days)) +
+  geom_histogram() +
+  scale_x_continuous(trans = "log10") +
+  facet_wrap(~ year) +
+  labs(subtitle = "Logbooks: Frequency distirbution of kw-fishing days by year",
+       x = "Fishing days",
+       y = NULL)
+```
+
+## Landings by gear by year:
+```{r , results='asis'}
+d <- 
+  ICES_LE %>% 
+  group_by(year, gear_code) %>% 
+  summarise(landings = round(sum(totweight) / 1e6, 1))
+d %>% 
+  spread(year, landings) %>% 
+  kable()
+d %>% 
+  ggplot(aes(year, landings)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~ gear_code, scale = "free_y") +
+  labs(subtitle = "Logbooks: Landings by year and gear",
+       x = NULL)
+```
+
+
+## Spatial distribution of effort by year:
+```{r , results='asis', fig.height = 9, eval = FALSE}
+coordGrd        <- unique(ICES_LE[,c("SI_LONG","SI_LATI","year","ICES_rectangle")])
+
+polRect  <- make_polVMS(coordGrd, resolution = 1)
+polRect$year    <- rep(coordGrd$year,each=5)
+polRect$ICES_rectangle <- rep(coordGrd$ICES_rectangle, each = 5)
+
+#TIDY ---
+dat             <- aggregate(ICES_LE$fishing_days,by=list(ICES_LE$year,ICES_LE$ICES_rectangle),FUN=sum,na.rm=T)
+
+steps               <- ceiling(max(dat$x,na.rm=T)/250)
+cutbreaksval        <- unique(c(-1,0,steps*c(1,2.5,5,10,25,50,100,250)))
+legval              <- outer(ac(cutbreaksval),ac(cutbreaksval),function(x,y){return(paste(x,"<=",y))})
+legval              <- c("0",diag(legval[-1,-c(1,2)]))
+
+palette <- c("white", brewer.pal(length(cutbreaksval)-2,"YlOrRd"))
+cols <- palette[cut(dat$x,breaks=cutbreaksval)]
+cols                <- cbind(cols,id=1:length(cols),ICES_rectangle=dat$Group.2,year=dat$Group.1)
+polRect              <- merge(polRect,cols,by=c("ICES_rectangle","year"))
+# ----
+
+spatialplot(polRect, xyrange = spatBoundLog) +
+  guides(fill = guide_legend(title = "Days@Sea")) +
+  scale_fill_manual(values = rev(palette), labels = rev(legval)) +
+  facet_wrap(~ year, ncol = 2) +
+  theme_icesqc(legend.position = "top")
+```
+
+```{r}
+ICES_LE %>% 
+  group_by(year, SI_LONG, SI_LATI) %>% 
+  summarise(fd = sum(fishing_days, na.rm = TRUE)) %>% 
+  ggplot() +
+  geom_sf(data = land, fill = "grey", colour = "grey") +
+  geom_tile(aes(SI_LONG, SI_LATI, fill = fd)) +
+  scale_fill_viridis_c(option = "B", direction = -1) +
+  facet_wrap(~ year) +
+  coord_sf(xlim = spatBoundLog$xrange,
+           ylim = spatBoundLog$yrange) +
+  labs(x = NULL, y = NULL, fill = "fishing\ndays")
+```
+
+
+
+
+```{r}
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+
+
+## Spatial difference of effort `r tempBoundLog[1]`:`r (tempBoundLog[2]-1)` vs `r tempBoundLog[2]`
+```{r,  fig.height = 9}
+base <- with(ICES_LE, 
+             aggregate(fishing_days, 
+                       by = list(ICES_rectangle = ICES_rectangle, year = year),
+                       FUN = sum, na.rm = TRUE))
+base <- dplyr::rename(base, fishing_days = x)
+
+# calculate total fishing hours for recent year
+
+recent <- base[base$year == tempBoundLog[2],]
+
+# calculate median of the total fishing hours per square for historical years
+base <- with(base[base$year < tempBoundLog[2],], 
+             aggregate(fishing_days,
+                       by = list(ICES_rectangle = ICES_rectangle), 
+                       FUN = median, na.rm = TRUE))
+base <- dplyr::rename(base, fishing_days_median = x)
+
+# join
+dat2plot <- dplyr::full_join(base,
+                             recent[,c("ICES_rectangle","fishing_days")])
+
+# set NAs to zero
+dat2plot$fishing_days_median[is.na(dat2plot$fishing_days_median)] <- 0
+dat2plot$fishing_days[is.na(dat2plot$fishing_days)] <- 0
+
+# calculate ratio (with exceptions for zeros)
+dat2plot$ratio <- 1/with(dat2plot, pmax(fishing_days, 1e-9) / pmax(fishing_days_median, 1e-9))
+
+# add back in lat and long
+dat2plot <- cbind(dat2plot,
+                  vmstools::ICESrectangle2LonLat(dat2plot$ICES_rectangle, midpoint = TRUE))
+
+# make 'fortified' data frame
+polRect <- make_polVMS(dat2plot, resolution = 1)
+polRect$ICES_rectangle <- rep(dat2plot$ICES_rectangle, each = 5)
+
+## tidy ---
+breaks <- rev(c(1e-10,0.5,2/3,0.8,0.952381,1,1.05,1.25,1.5,2,1e10))
+legval <- c("historic >>","historic> +100%","historic> +50%","historic> +25%",
+            "+/-5%",
+            "recent> +5%","recent> +25%","recent> +50%","recent> +100%","recent >>")
+palette <- brewer.pal(length(cutbreaksval)-1,"RdYlBu")
+colgrp <- as.numeric(cut(dat2plot$ratio, breaks = breaks))
+cols <- cbind(cols = palette[colgrp], ICES_rectangle = dat2plot$ICES_rectangle)
+polRect <- merge(polRect, cols, by=c("ICES_rectangle"))
+# ---
+# EH should really be spatCoreLog
+spatialplot(polRect, xyrange = spatBoundLog) +
+  guides(fill=guide_legend(title="Days@Sea")) +
+  scale_fill_manual(values = rev(palette), labels = legval) +
+  theme_icesqc(legend.position = "right")
+```
+
+
+
+## Spatial difference of effort `r tempBoundLog[2]-1` vs `r tempBoundLog[2]`
+
+```{r,  fig.height = 9}
+base <- with(ICES_LE, 
+             aggregate(fishing_days, 
+                       by = list(ICES_rectangle = ICES_rectangle, year = year),
+                       FUN = sum, na.rm = TRUE))
+base <- dplyr::rename(base, fishing_days = x)
+
+# calculate total fishing hours for recent year
+recent <- base[base$year == tempBoundLog[2],]
+
+# previous year
+base <- base[base$year == tempBoundLog[2]-1,]
+base <- dplyr::rename(base, fishing_days_median = fishing_days)
+
+# join
+dat2plot <- dplyr::full_join(base,
+                             recent[,c("ICES_rectangle","fishing_days")])
+
+# set NAs to zero
+dat2plot$fishing_days_median[is.na(dat2plot$fishing_days_median)] <- 0
+dat2plot$fishing_days[is.na(dat2plot$fishing_days)] <- 0
+
+# calculate ratio (with exceptions for zeros)
+dat2plot$ratio <- 1/with(dat2plot, pmax(fishing_days, 1e-9) / pmax(fishing_days_median, 1e-9))
+
+# add back in lat and long
+dat2plot <- cbind(dat2plot,
+                  vmstools::ICESrectangle2LonLat(dat2plot$ICES_rectangle, midpoint = TRUE))
+
+# make 'fortified' data frame
+polRect <- make_polVMS(dat2plot, resolution = 1)
+polRect$ICES_rectangle <- rep(dat2plot$ICES_rectangle, each = 5)
+
+## tidy ---
+breaks <- rev(c(1e-10,0.5,2/3,0.8,0.952381,1,1.05,1.25,1.5,2,1e10))
+legval <- c("historic >>","historic> +100%","historic> +50%","historic> +25%",
+            "+/-5%",
+            "recent> +5%","recent> +25%","recent> +50%","recent> +100%","recent >>")
+palette <- brewer.pal(length(cutbreaksval)-1,"RdYlBu")
+colgrp <- as.numeric(cut(dat2plot$ratio, breaks = breaks))
+cols <- cbind(cols = palette[colgrp], ICES_rectangle = dat2plot$ICES_rectangle)
+polRect <- merge(polRect, cols, by=c("ICES_rectangle"))
+# ---
+
+spatialplot(polRect, xyrange = spatBoundLog) +
+  guides(fill=guide_legend(title="Days@Sea")) +
+  scale_fill_manual(values = rev(palette), labels = legval) +
+  theme_icesqc(legend.position = "right")
+```
+
+\newpage
+
+
+## Relationship fishing days and total weight
+```{r , fig.height = 9}
+ggplot(ICES_LE[ICES_LE$year == tempBoundLog[2],], 
+       aes(x = fishing_days, y = totweight)) +
+  geom_point() +
+  facet_wrap(~ gear_code, ncol = 3, scale = "free") +
+  xlab("Fishing days") + ylab ("Total weight") +
+  theme_icesqc()
+```
+
+\newpage
+
+## Mean landing per KW fishing day by year:
+
+```{r , results='asis'}
+ps <- gear_splits(with(ICES_LE, totweight/kw_fishing_days), data = ICES_LE, "kg landed", gear_groups = 4, func = median)
+ps$table
+for (p in ps$plots) print(p)
+```
+
+\newpage
+
+## Value by gear by year:
+```{r , results='asis'}
+ps <- gear_splits(with(ICES_LE, totvalue), data = ICES_LE, "EUR landed", gear_groups = 4, func = median)
+ps$table
+for (p in ps$plots) print(p)
+```
+
+\newpage
+
+## Mean value per KW fishing day by year:
+
+```{r , results='asis'}
+ps <- gear_splits(with(ICES_LE, totvalue/kw_fishing_days), data = ICES_LE, "EUR/kWh", gear_groups = 4, func = median)
+ps$table
+for (p in ps$plots) print(p)
+```
+
+\newpage
+
+##  Average price:
+
+```{r , results='asis'}
+ps <- gear_splits(with(ICES_LE, totvalue/totweight), data = ICES_LE, "Mean price (EUR/kg)", gear_groups = 4, func = median)
+cat(ps$table)
+for (p in ps$plots) print(p)
+```
+
+\newpage
+
+## Comparison of Metier level 6 reporting between logbook and VMS
+```{r met6-comparison, results = 'asis', eval = FALSE}
+
+ledat <- with(ICES_LE, table(LE_MET_level6, year))
+vedat <- with(ICES_VE, table(LE_MET_level6, year))
+
+dat2tab <- 
+  rbind(
+    cbind(as.data.frame.table(ledat), data = "LE (records)"),
+    cbind(as.data.frame.table(vedat), data = "VE (pings)"))
+
+tab <- with(dat2tab, tapply(Freq, list(LE_MET_level6, data, year), sum))
+tab[tab == 0] <- NA
+
+for (i in dimnames(tab)[[3]]) {
+  x <- tab[,,i]
+  x <- x[apply(!is.na(x), 1, any),]
+  cat(kable(cbind(x, year = i), booktabs = TRUE), sep = "\n")
+  cat("\n")
+}
+```
+
