@@ -17,7 +17,7 @@ vessel_category <-
   filter(vid %in% VID) %>%
   # "correct" brl for Ásgrímur Halldórsson
   mutate(brl = ifelse(vid == 2780, 1000, brl)) %>%
-  select(vid, kw = engine_kw, length, length_class, grt)
+  select(vid, kw, length, vlclass, grt)
 
 metier <-
   tribble(
@@ -113,63 +113,77 @@ lb.wide <-
          country = "ICE",
          year = year(date),
          month = month(date)) %>%
-  rename(vessel_length_class = length_class,
-         mesh = mesh.std)
+  rename(mesh = mesh.std)
 
 # CHECK
 # lb.wide %>% select(gid, mesh, dcf4:dcf6) %>% distinct()
 
 write_rds(lb.wide, "data/IS_lb-wide.rds")
 
-
-
-c(recordtype = 'character',
-  country = 'character',
-  year = 'numeric',
-  month = 'numeric',
-  ICES_rectangle = 'character',
-  gear_code = 'character',
-  LE_MET_level6 = 'character',
-  fishing_days = 'numeric',
-  vessel_length_category = 'character',
-  vms_enabled = 'character',
-  kw_fishing_days = 'numeric',
-  totweight = 'numeric',
-  totvalue = 'numeric',
-  UniqueVessels = 'numeric')
-
 annex2 <-
   lb.wide %>%
-  rename(recordtype = type, ICES_rectangle = ices,
-         gear_code = dcf4, LE_MET_level6 = dcf6,
-         vessel_length_category = vessel_length_class) %>%
-  group_by(recordtype, country, year, month, ICES_rectangle, gear_code,
-           LE_MET_level6, vessel_length_category) %>%
-  summarise(fishing_days = n(),
+  group_by(date, vid) %>%
+  # 2020 - new, older datacall deliveries were wrong
+  mutate(fdps = 1 / n()) %>%  # fishing days per setting
+  ungroup() %>%
+  group_by(type, country, year, month, ices, dcf4,
+           dcf6, vlclass) %>%
+  summarise(fishing_days = sum(fdps),
             kw_fishing_days = sum(fishing_days * kw),
             totweight = sum(catch, na.rm = TRUE),
             totvalue = NA_real_,
             UniqueVessels = n_distinct(vid)) %>%
   ungroup() %>%
-  mutate(vms_enabled = "yes") %>%
-  select(recordtype:LE_MET_level6,
-         fishing_days,
-         vessel_length_category,
-         vms_enabled,
-         kw_fishing_days,
-         totweight,
-         totvalue,
-         UniqueVessels)
+  mutate(vms_enabled = "yes")
 
-# HERE - FILTER OUT INVALID ICES RECTANGLES - just so the computer does not complain
+# SANITY TEST
+
+library(mar)
+con <- connect_mar()
+fishing.days <-
+  mar:::lb_base(con) %>%
+  filter(year %in% 2009:2019) %>%
+  select(year, date, vid) %>%
+  collect(n = Inf) %>%
+  distinct() %>%
+  count(year)
+annex2 %>%
+  group_by(year) %>%
+  summarise(fd = sum(fishing_days)) %>%
+  full_join(fishing.days) %>%
+  mutate(p.difference = (fd - n) / n * 100)
+
 annex2 <-
   annex2 %>%
-  mutate(valid.ices = !is.na(vmstools::ICESrectangle2LonLat(ICES_rectangle)$SI_LONG))
+  select(
+    type,                    #  1
+    country,                 #  2
+    year,                    #  3
+    month,                   #  4
+    UniqueVessels,           #  5
+    #Anonymized_vessel_id     #  6
+    ices,                    #  7
+    dcf4,                    #  8
+    dcf6,                    #  9
+    vlclass,     # 10
+    vms_enabled,             # 11
+    fishing_days,            # 12
+    kw_fishing_days,         # 13
+    totweight,               # 14
+    totvalue                 # 15
+  ) %>%
+  # get rid of invalid ices rectangles
+  mutate(valid = !is.na(vmstools::ICESrectangle2LonLat(ices)$SI_LONG)) %>%
+  filter(valid) %>%
+  select(-valid)
 
-write_rds(annex2, "data/ICES_LE_ISL.rds")
+glimpse(annex2)
 
 annex2 %>%
-  filter(valid.ices) %>%
-  select(-valid.ices) %>%
+  write_rds("data/ICES_LE_ISL.rds")
+
+annex2 %>%
   write_csv("delivery/ICES_LE_ISL.csv")
+
+
 

@@ -87,9 +87,9 @@ lb.base %>%
   distinct() %>%
   left_join(mar:::vessel_registry(con, standardize = TRUE),
             by = "vid") %>%
-  select(vid, name, uid, cs, imo, vclass, engine_kw,
-         brl, grt, length_registered, length,
-         length_class) %>%
+  select(vid, name, uid, cs, imo, kw = engine_kw,
+         brl, grt, length,
+         vlclass = length_class) %>%
   left_join(mar:::stk_mid_vid_2020(con) %>%
               select(vid, mid, localid, globalid),
             by = "vid") %>%
