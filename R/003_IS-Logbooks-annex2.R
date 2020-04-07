@@ -128,13 +128,13 @@ annex2 <-
   ungroup() %>%
   group_by(type, country, year, month, ices, dcf4,
            dcf6, vlclass) %>%
-  summarise(fishing_days = sum(fdps),
-            kw_fishing_days = sum(fishing_days * kw),
-            totweight = sum(catch, na.rm = TRUE),
-            totvalue = NA_real_,
-            UniqueVessels = n_distinct(vid)) %>%
+  summarise(fd = sum(fdps),
+            kwfd = sum(fd * kw),
+            wgt = sum(catch, na.rm = TRUE),
+            value = NA_real_,
+            unqv = n_distinct(vid)) %>%
   ungroup() %>%
-  mutate(vms_enabled = "yes")
+  mutate(vms = "yes")
 
 # SANITY TEST
 
@@ -147,9 +147,10 @@ fishing.days <-
   collect(n = Inf) %>%
   distinct() %>%
   count(year)
+# NOTE: does not take into account that invalids are going to be discarded
 annex2 %>%
   group_by(year) %>%
-  summarise(fd = sum(fishing_days)) %>%
+  summarise(fd = sum(fd)) %>%
   full_join(fishing.days) %>%
   mutate(p.difference = (fd - n) / n * 100)
 
@@ -160,22 +161,20 @@ annex2 <-
     country,                 #  2
     year,                    #  3
     month,                   #  4
-    UniqueVessels,           #  5
+    unqv,                    #  5
     #Anonymized_vessel_id     #  6
     ices,                    #  7
     dcf4,                    #  8
     dcf6,                    #  9
-    vlclass,     # 10
-    vms_enabled,             # 11
-    fishing_days,            # 12
-    kw_fishing_days,         # 13
-    totweight,               # 14
-    totvalue                 # 15
+    vlclass,                 # 10
+    vms,                     # 11
+    fd,                      # 12
+    kwfd,                    # 13
+    wgt,                     # 14
+    value                    # 15
   ) %>%
   # get rid of invalid ices rectangles
-  mutate(valid = !is.na(vmstools::ICESrectangle2LonLat(ices)$SI_LONG)) %>%
-  filter(valid) %>%
-  select(-valid)
+  mutate(valid = !is.na(vmstools::ICESrectangle2LonLat(ices)$SI_LONG))
 
 glimpse(annex2)
 
@@ -183,6 +182,8 @@ annex2 %>%
   write_rds("data/ICES_LE_ISL.rds")
 
 annex2 %>%
+  filter(valid) %>%
+  select(-valid) %>%
   write_csv("delivery/ICES_LE_ISL.csv")
 
 
