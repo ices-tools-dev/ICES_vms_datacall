@@ -1,31 +1,34 @@
 ---
 title: "Logbook QC"
-author: "Einar Hjörleifsson"
-date: "06/04/2020"
 output: 
   html_document: 
     fig_height: 6
     fig_width: 9
     code_folding: hide
+    toc: yes
+    toc_float: yes
+    toc_depth: 3
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 ```
 
 ```{r}
 library(knitr)
+#library(kableExtra)
 library(vmstools)
-library(RColorBrewer)
+#library(RColorBrewer)
 library(rnaturalearth)
 library(sf)
+library(mapview)
 library(tidyverse)
 ```
 
 
 ```{r}
 land <- 
-  ne_countries("medium", returnclass = "sf") %>% 
+  rnaturalearth::ne_countries("medium", returnclass = "sf") %>% 
   select(admin) %>% 
   st_crop(xmin = -70,
           xmax = 90,
@@ -34,16 +37,23 @@ land <-
 ```
 
 ```{r}
-load("2019_VMS_ICES-QC/bootstrap/data/eurPols.Rdata")
-polLand <- fortify(eurPols)
-```
-
-
-```{r}
 lgs <- 
   read_csv('delivery/ICES_LE_ISL.csv')
 ```
 
+
+## Preamble
+
+
+**NOTE to oneself**: The fundamental record (a single row) is statistics by year, month, statistical rectangel, dcf6 and vessel category.
+
+**TODO**: Complete spatial comparision between year
+
+A peek at the data:
+
+```{r}
+glimpse(lgs)
+```
 
 ```{r logbook-checks}
 lgs <- 
@@ -58,131 +68,55 @@ spatCoreLog  <- list(xrange = quantile(lgs$lon, c(0.025, 0.975), na.rm=TRUE),
 tempBoundLog <- range(lgs$year, na.rm=TRUE)
 ```
 
-```{r utilities}
-source("2019_VMS_ICES-QC/utilities_report.R")
-```
+## Time
 
+#### **Records by year**
 
-## Years & number of records for which data has been submitted:
-
-```{r}
+```{r, fig.height = 3}
 d <- 
   lgs %>% 
   dplyr::count(year)
 
 d %>% 
-  knitr::kable()
-
-d %>% 
-  ggplot(aes(year, n)) +
-  geom_point() +
-  geom_line() +
-  labs(subtitle = "Logbooks:: Number of annual records",
-       x = NULL, y = NULL) +
-  scale_x_continuous(breaks = seq(2000, 2030, by = 2))
-```
-
-
-## Records assigned to invalid Statistical Rectangles
-
-```{r invalid stat-sqrs-le}
-if(any(is.na(lgs$lon))) {
-  
-  knitr::kable(table(`ICES Rectangle` = lgs$ICES_rectangle[is.na(lgs$lon)],
-                     Year = lgs$year[is.na(lgs$lon)]), booktabs = TRUE)
-  
-} else {
-  
-  x <- "There were no invalid Statistical Rectangles reported"
-  attr(x, "format") <- "markdown"
-  attr(x, "class") <- "knit_asis"
-  x
-}
-```
-
-## Distribution of logbook entries by month:
-
-```{r logbook-entries-month, results='asis'}
-d <- 
-  lgs %>% 
-  count(month, year)
-d %>% 
   spread(year, n) %>% 
   kable()
 
 d %>% 
+  ggplot() +
+  theme_gray(base_size = 14) +
+  geom_pointrange(aes(x = year, y = n,
+                      ymin = 0.95 * min(d$n), ymax = n),
+                  size = 1.5) +
+  labs(x = NULL, y = "Number of records") +
+  scale_x_continuous(breaks = seq(2000, 2030, by = 2))
+```
+
+#### **Records by year and month**
+
+```{r}
+d <- 
+  lgs %>% 
+  count(month, year)
+d %>% 
+  spread(month, n) %>% 
+  kable()
+
+d %>% 
   ggplot(aes(year, n)) +
+  theme_grey(base_size = 14) +
   geom_point() +
   geom_line() +
   facet_wrap(~ month) +
-  scale_x_continuous(breaks = seq(2000, 2030, by = 2)) +
-  labs(subtitle = "Logbooks: Records by months and years",
+  scale_x_continuous(breaks = seq(2000, 2030, by = 4)) +
+  labs(caption = "Records by year and month",
        x = NULL, y = NULL)
 ```
 
+## Vessels
 
-## Area extent of data submitted by year:
+#### **Frequency of unique vessel counts by year**
 
-```{r , results='asis', fig.height = 9}
-if (any(!is.na(lgs$lon))) {
-  lgs %>% 
-    group_by(year) %>% 
-    summarise(across(c("lon", "lat"), list(min = min, max = max))) %>% 
-    kable()
-} else {
-  x <- "There were no valid Statistical Rectangles reported"
-  attr(x, "format") <- "markdown"
-  attr(x, "class") <- "knit_asis"
-  x
-}
-```
-
-## Area for which data has been submitted:
-
-```{r , results='asis', fig.height = 9}
-if (any(!is.na(lgs$lon))) {
-  p <- 
-    lgs %>% 
-    select(year, lon = lon, lat = lat) %>% 
-    distinct() %>% 
-    ggplot() +
-    theme_minimal() +
-    geom_sf(data = land, fill = "grey", colour = "grey") +
-    geom_tile(aes(lon, lat), fill = "red3") +
-    facet_wrap(~ year) +
-    labs(subtitle = "Area for which data has been submitted",
-         x = NULL, y = NULL)
-  p +
-    coord_sf(xlim = spatBoundLog$xrange,
-             ylim = spatBoundLog$yrange)
-} else {
-  x <- "There were no valid Statistical Rectangles reported"
-  attr(x, "format") <- "markdown"
-  attr(x, "class") <- "knit_asis"
-  x
-}
-```
-
-
-
-```{r , results='asis',fig.height = 9}
-if (any(!is.na(lgs$lon))) {
-  p +
-    coord_sf(xlim = spatCoreLog$xrange,
-             ylim = spatCoreLog$yrange)
-} else {
-  x <- "There were no valid Statistical Rectangles reported"
-  attr(x, "format") <- "markdown"
-  attr(x, "class") <- "knit_asis"
-  x
-}
-```
-
-\newpage
-
-## Frequency of unique vessel counts by year:
-
-```{r records-by-unique-vessels-le}
+```{r, fig.height = 4}
 if (any(!is.na(lgs$unqv))) {
   
   d <- 
@@ -197,10 +131,12 @@ if (any(!is.na(lgs$unqv))) {
     ggplot(aes(unqv, n, colour = as.factor(year))) +
     geom_line() +
     scale_y_continuous(trans = "log10") +
-    labs(subtitle = "Frequency of unique vessels",
+    scale_x_continuous(trans = "log10") +
+    labs(caption = "Frequency of unique vessels",
          x = "Unique vessel count",
          y = "Number of records",
-         colour = "Year")
+         colour = "Year") +
+    theme(legend.position = c(0.95, 0.65))
   
 } else {
   x <- "There were no unique vessel counts provided"
@@ -210,9 +146,9 @@ if (any(!is.na(lgs$unqv))) {
 }
 ```
 
-## Frequency of vessel length categories by year:
+#### **Frequency of vessel length categories by year**
 
-```{r , results='asis'}
+```{r}
 d <- 
   lgs %>% 
   # NOTE: Make vlclass as factor and order
@@ -227,13 +163,27 @@ d %>%
   geom_point() +
   geom_line() +
   facet_wrap(~ vessel_length, scale = "free_y") +
-  labs(subtitle = "Frequency of vessel length categories by year",
+  labs(caption = "Frequency of vessel length categories by year",
        x = NULL, y = "Number of records")
 ```
 
-## Frequency of gear codes by year:
+## DCFs
 
-```{r , results='asis'}
+### DCF4
+
+#### **Number of unique gear (DCF4) codes by year**
+
+```{r}
+lgs %>% 
+  group_by(year) %>% 
+  summarise(n = n_distinct(dcf4)) %>% 
+  spread(year, n) %>% 
+  kable()
+```
+
+#### **Number of records by gear code (DCF4)**
+
+```{r}
 d <- 
   lgs %>% 
   count(year, dcf4)
@@ -246,22 +196,25 @@ d %>%
   ggplot(aes(year, n)) +
   geom_point() +
   geom_line() +
-  facet_wrap(~ dcf4, scale = "free_y") +
-  labs(subtitle = "Frequency of gear codes by year",
+  facet_wrap(~ dcf4, scale = "free_y", ncol = 3) +
+  labs(caption = "Records by gear code (DCF4) by year",
        x = NULL, y = "Number of records") +
   scale_x_continuous(breaks = seq(2000, 2030, by = 2))
 ```
 
-## Number of unique DCF Level 6 codes by year:
+### DCF6
 
-```{r , results='asis'}
+#### **Number of unique DCF Level 6 codes by year**
+
+```{r}
 lgs %>% 
   group_by(year) %>% 
   summarise(n = n_distinct(dcf6)) %>% 
+  spread(year, n) %>% 
   kable()
 ```
 
-## Top 5 DCF Level 6 codes by year:
+#### **Top 12 DCF Level 6 codes by year**
 
 ```{r , results='asis'}
 top <- 
@@ -281,25 +234,16 @@ d %>%
   ggplot(aes(year, n)) +
   geom_point() +
   geom_line() +
-  facet_wrap(~ dcf6, scale = "free_y") +
+  facet_wrap(~ dcf6, scale = "free_y", ncol = 3) +
   scale_x_continuous(breaks = seq(2000, 2030, by = 2)) +
-  labs(subtitle = "Top 12 DCF Level 6 codes by year",
+  labs(caption = "Top 12 DCF Level 6 codes by year",
        x = NULL, y = "Number of records")
 ```
 
 
+## Statistics
 
-## Frequency of VMS enabled category
-
-```{r , results='asis'}
-kable(table(lgs$vms,lgs$vlclass), booktabs = TRUE)
-```
-
-
-
-## Average fishing days:
-
-NOTE: Should possible invent a better statistical test here, like to end up with whole integer in fishing days.
+#### **Frequency distribution of fishing days**
 
 ```{r , results='asis'}
 lgs %>% 
@@ -307,30 +251,29 @@ lgs %>%
   geom_histogram() +
   scale_x_continuous(trans = "log10") +
   facet_wrap(~ year) +
-  labs(subtitle = "Logbooks: Frequency distirbution of fishing days",
-       x = "Fishing days",
+  labs(x = "Fishing days",
        y = NULL)
 ```
 
+#### **Frequency distirbution of kw-fishing days**
 
-## Average KW-hours:
 ```{r , results='asis'}
 lgs %>% 
   ggplot(aes(kwfd)) +
   geom_histogram() +
   scale_x_continuous(trans = "log10") +
   facet_wrap(~ year) +
-  labs(subtitle = "Logbooks: Frequency distirbution of kw-fishing days",
-       x = "Kilowatt fishing days",
+  labs(x = "Kilowatt fishing days",
        y = NULL)
 ```
 
-## Landings by gear by year:
-```{r , results='asis'}
+#### **Landings [tonnes] by gear by year**
+
+```{r}
 d <- 
   lgs %>% 
   group_by(year, dcf4) %>% 
-  summarise(landings = round(sum(wgt) / 1e6, 1))
+  summarise(landings = round(sum(wgt) / 1e3, 1))
 d %>% 
   spread(year, landings) %>% 
   kable()
@@ -338,16 +281,137 @@ d %>%
   ggplot(aes(year, landings)) +
   geom_point() +
   geom_line() +
+  facet_wrap(~ dcf4, scale = "free_y", ncol = 3) +
+  labs(caption = "Landings by year and gear",
+       x = NULL,
+       y = "[tonnes]")
+```
+
+#### **Mean landing per fishing day by year**
+
+```{r}
+lgs %>% 
+  mutate(wgt.pkfd = (wgt / 1e3) / fd) %>% 
+  ggplot(aes(year, wgt.pkfd)) +
+  stat_summary(fun.data = "mean_cl_boot", size = 1) +
   facet_wrap(~ dcf4, scale = "free_y") +
-  labs(subtitle = "Logbooks: Landings by year and gear",
-       x = NULL)
+  labs(x = NULL, y = "[tonnes / day]",
+       caption = "Bootstrap mean and confidence interval")
+```
+
+#### **Relationship fishing days and total weight**
+
+```{r}
+lgs %>% 
+  filter(year == max(year)) %>% 
+  ggplot() +
+  geom_point(aes(fd, wgt / 1e3)) +
+  facet_wrap(~ dcf4, scale = "free") +
+  labs(x = "Fishing days",
+       y = "Total weight [tonnes]")
+```
+
+#### **Mean landing per KW fishing day by year**
+
+```{r}
+lgs %>% 
+  mutate(wgt.pkwd = (wgt / 1e3) / kwfd) %>% 
+  ggplot(aes(year, wgt.pkwd)) +
+  stat_summary(fun.data = "mean_cl_boot", size = 1) +
+  facet_wrap(~ dcf4, scale = "free_y") +
+  labs(x = NULL, y = "[kg]",
+       caption = "Bootstrap mean and confidence interval")
+```
+
+#### **Value by gear by year**
+
+NOTE: This should be similar to landings by gear
+
+```{r}
+
 ```
 
 
-## Spatial distribution of effort by year:
+#### **Mean value per KW fishing day by year**
 
 ```{r}
-p <- 
+if(any(!is.na(lgs$value))) {
+  lgs %>% 
+    mutate(value.pkwd = value / kwfd) %>% 
+    ggplot(aes(year, value.pkwd)) +
+    stat_summary(fun.data = "mean_cl_boot", size = 1) +
+    facet_wrap(~ dcf4, scale = "free_y") +
+    labs(x = NULL, y = "[kg]",
+         caption = "Bootstrap mean and confidence interval")
+}
+```
+
+
+####  **Average price**
+
+```{r eval = FALSE}
+ps <- gear_splits(with(lgs, value/wgt), data = lgs, "Mean price (EUR/kg)", gear_groups = 4, func = median)
+cat(ps$table)
+for (p in ps$plots) print(p)
+```
+
+## Space
+
+#### **Invalid statistical rectangles**
+
+```{r invalid stat-sqrs-le}
+if(any(is.na(lgs$lon))) {
+  
+  knitr::kable(table(`ICES Rectangle` = lgs$ices[is.na(lgs$lon)],
+                     Year = lgs$year[is.na(lgs$lon)]), booktabs = TRUE)
+  
+} else {
+  
+  x <- "There were no invalid Statistical Rectangles reported"
+  attr(x, "format") <- "markdown"
+  attr(x, "class") <- "knit_asis"
+  x
+}
+```
+
+#### **Spatial extent of data submitted by year**
+
+```{r}
+lgs %>% 
+  group_by(year) %>% 
+  summarise(across(c("lon", "lat"), list(min = min, max = max))) %>% 
+  kable()
+```
+
+#### **Overall range**
+
+```{r}
+if (any(!is.na(lgs$lon))) {
+  p1 <- 
+    lgs %>% 
+    select(year, lon = lon, lat = lat) %>% 
+    distinct() %>% 
+    ggplot() +
+    theme_minimal(base_size = 14) +
+    geom_sf(data = land, fill = "grey", colour = "grey") +
+    geom_tile(aes(lon, lat), fill = "red3") +
+    facet_wrap(~ year)
+  p1 +
+    coord_sf(xlim = spatBoundLog$xrange,
+             ylim = spatBoundLog$yrange) +
+    labs(x = NULL, y = NULL)
+} else {
+  x <- "There were no valid Statistical Rectangles reported"
+  attr(x, "format") <- "markdown"
+  attr(x, "class") <- "knit_asis"
+  x
+}
+```
+
+#### **Effort - overall range**
+
+```{r}
+p2 <- 
   lgs %>% 
   group_by(year, lon, lat) %>% 
   summarise(fd = sum(fd, na.rm = TRUE)) %>% 
@@ -357,18 +421,31 @@ p <-
   scale_fill_viridis_c(option = "B", direction = -1) +
   facet_wrap(~ year) +
   labs(x = NULL, y = NULL, fill = "fishing\ndays")
-p +
+p2 +
   coord_sf(xlim = spatBoundLog$xrange,
            ylim = spatBoundLog$yrange)
 ```
 
+#### **Core range**
+
 ```{r}
-p +
+p1 +
+  coord_sf(xlim = spatCoreLog$xrange,
+           ylim = spatCoreLog$yrange) +
+  labs(x = NULL, y = NULL)
+```
+
+### **Effort - core range**
+
+```{r}
+p2 +
   coord_sf(xlim = spatCoreLog$xrange,
            ylim = spatCoreLog$yrange)
 ```
 
-## Spatial difference of effort
+#### Spatial difference of effort
+
+**INCOMPLETE**
 
 ```{r}
 compare_periods <- function(d, yr1 = 2018, yr2 = 2019) {
@@ -400,6 +477,7 @@ compare_periods <- function(d, yr1 = 2018, yr2 = 2019) {
 }
 ```
 
+**INCOMPLETE**
 
 ```{r}
 lgs %>% 
@@ -410,8 +488,10 @@ lgs %>%
   scale_fill_manual(values = c("cyan", colorspace::diverge_hcl(10), "orange")) +
   coord_quickmap() +
   labs(x = NULL, y = NULL,
-       subtitle = "Comparison: 2019 vs 2018")
+       title = "Comparison: 2019 vs 2018")
 ```
+
+**INCOMPLETE**
 
 ```{r}
 lgs %>% 
@@ -422,11 +502,13 @@ lgs %>%
   scale_fill_manual(values = c("cyan", colorspace::diverge_hcl(10), "orange")) +
   coord_quickmap() +
   labs(x = NULL, y = NULL,
-       subtitle = "Comparison: 2019 vs past")
+       title = "Comparison: 2019 vs past")
 ```
 
+**INCOMPLETE**
 
 ```{r}
+library(RColorBrewer)
 breaks <- rev(c(1e-10,0.5,2/3,0.8,0.952381,1,1.05,1.25,1.5,2,1e10))
 legval <- c("historic >>","historic> +100%","historic> +50%","historic> +25%",
             "+/-5%",
@@ -462,6 +544,7 @@ d %>%
 
 ```
 
+**INCOMPLETE**
 
 ```{r}
 d <- 
@@ -482,8 +565,7 @@ d <-
                         recent  > 0 & historic == 0 ~ 6,
                         TRUE ~ log(recent / historic))) 
 
-library(sf)
-library(mapview)
+
 ices <- 
   read_sf("/net/www/export/home/ftp/pub/data/shapes/ices_rectangles.gpkg") %>% 
   select(ices = icesname)
@@ -502,66 +584,7 @@ d %>%
 
 
 
-```{r,  fig.height = 9}
-base <- with(lgs, 
-             aggregate(fd, 
-                       by = list(ICES_rectangle = ices, year = year),
-                       FUN = sum, na.rm = TRUE))
-base <- dplyr::rename(base, fd = x)
-
-# calculate total fishing hours for recent year
-
-recent <- base[base$year == tempBoundLog[2],]
-
-# calculate median of the total fishing hours per square for historical years
-base <- with(base[base$year < tempBoundLog[2],], 
-             aggregate(fd,
-                       by = list(ICES_rectangle = ICES_rectangle), 
-                       FUN = median, na.rm = TRUE))
-base <- dplyr::rename(base, fishing_days_median = x)
-
-# join
-dat2plot <- dplyr::full_join(base,
-                             recent[,c("ICES_rectangle","fd")])
-
-# set NAs to zero
-dat2plot$fishing_days_median[is.na(dat2plot$fishing_days_median)] <- 0
-dat2plot$fd[is.na(dat2plot$fd)] <- 0
-
-# calculate ratio (with exceptions for zeros)
-dat2plot$ratio <- 1/with(dat2plot, pmax(fd, 1e-9) / pmax(fishing_days_median, 1e-9))
-
-# add back in lat and long
-dat2plot <- cbind(dat2plot,
-                  vmstools::ICESrectangle2LonLat(dat2plot$ICES_rectangle, midpoint = TRUE))
-
-# make 'fortified' data frame
-polRect <- make_polVMS(dat2plot, resolution = 1)
-polRect$ICES_rectangle <- rep(dat2plot$ICES_rectangle, each = 5)
-
-## tidy ---
-breaks <- rev(c(1e-10,0.5,2/3,0.8,0.952381,1,1.05,1.25,1.5,2,1e10))
-legval <- c("historic >>","historic> +100%","historic> +50%","historic> +25%",
-            "+/-5%",
-            "recent> +5%","recent> +25%","recent> +50%","recent> +100%","recent >>")
-palette <- brewer.pal(length(breaks)-1,"RdYlBu")
-colgrp <- as.numeric(cut(dat2plot$ratio, breaks = breaks))
-cols <- cbind(cols = palette[colgrp], ICES_rectangle = dat2plot$ICES_rectangle)
-polRect <- merge(polRect, cols, by=c("ICES_rectangle"))
-# ---
-# EH should really be spatCoreLog
-spatialplot(polRect, xyrange = spatBoundLog) +
-  guides(fill=guide_legend(title="Days@Sea")) +
-  scale_fill_manual(values = rev(palette), labels = legval) +
-  theme_icesqc(legend.position = "right") +
-  coord_quickmap()
-```
-
-
-
-
-
-## Spatial difference of effort `r tempBoundLog[2]-1` vs `r tempBoundLog[2]`
+#### Spatial difference of effort `r tempBoundLog[2]-1` vs `r tempBoundLog[2]`
 
 ```{r,  fig.height = 9, eval = FALSE}
 base <- with(lgs, 
@@ -614,69 +637,20 @@ spatialplot(polRect, xyrange = spatBoundLog) +
 ```
 
 
-## Relationship fishing days and total weight
-```{r , fig.height = 9}
+
+## VMS
+
+```{r}
 lgs %>% 
-  filter(year == max(year)) %>% 
-  ggplot() +
-  geom_point(aes(fd, wgt / 1e3)) +
-  facet_wrap(~ dcf4, scale = "free") +
-  labs(x = "Fishing days",
-       y = "Total weight [tonnes]",
-       subtitle = "Relationship of fishing days and total weight")
+  count(vlclass, vms) %>% 
+  spread(vlclass, n) %>% 
+  kable(caption = "Number of records by availability of VMS")
 ```
 
 
-## Mean landing per KW fishing day by year:
+#### Comparison of Metier level 6 reporting between logbook and VMS
 
-```{r , results='asis'}
-lgs %>% 
-  mutate(wgt.pkwd = wgt / kwfd) %>% 
-  ggplot(aes(year, wgt.pkwd)) +
-  stat_summary(fun.data = "mean_cl_boot", size = 1) +
-  facet_wrap(~ dcf4, scale = "free_y") +
-  labs(x = NULL, y = "[kg]",
-       subtitle = "Mean landing per KW fishing day",
-       caption = "Bootstrap mean and confidence interval")
-```
-
-\newpage
-
-## Value by gear by year:
-
-NOTE: This should be similar to landings by gear
-
-```{r , results='asis'}
-
-```
-
-
-## Mean value per KW fishing day by year:
-
-```{r , results='asis'}
-lgs %>% 
-  mutate(value.pkwd = wgt / kwfd) %>% 
-  ggplot(aes(year, value.pkwd)) +
-  stat_summary(fun.data = "mean_cl_boot", size = 1) +
-  facet_wrap(~ dcf4, scale = "free_y") +
-  labs(x = NULL, y = "[kg]",
-       subtitle = "Mean value per KW fishing day",
-       caption = "Bootstrap mean and confidence interval")
-```
-
-
-##  Average price:
-
-```{r , results='asis', eval = FALSE}
-ps <- gear_splits(with(lgs, value/wgt), data = lgs, "Mean price (EUR/kg)", gear_groups = 4, func = median)
-cat(ps$table)
-for (p in ps$plots) print(p)
-```
-
-\newpage
-
-## Comparison of Metier level 6 reporting between logbook and VMS
-```{r met6-comparison, results = 'asis', eval = FALSE}
+```{r met6-comparison, eval = FALSE}
 
 ledat <- with(lgs, table(LE_MET_level6, year))
 vedat <- with(ICES_VE, table(LE_MET_level6, year))
