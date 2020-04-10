@@ -4,19 +4,63 @@
 
 # ------------------------------------------------------------------------------
 # LOGBOOK DUMPS
-#  2020 datacall: using mar::*lb_*** for the first time, to simplify
-#                 coding downstream
+#  2020 datacall: 1. using mar::*lb_*** for the first time, to simplify
+#                    coding downstream
+#                 2. Added gear from landings
+#                 3. Added species with highest catch in a setting
 
 YEARS <- 2009:2019
 
+library(data.table)
 library(mar)
 library(stringr)
 library(lubridate)
 library(tidyverse)
 con <- connect_mar()
 
+match_nearest_date <- function(lb, ln) {
+
+  lb.dt <-
+    lb %>%
+    select(vid, datel) %>%
+    distinct() %>%
+    setDT()
+
+  ln.dt <-
+    ln %>%
+    select(vid, datel) %>%
+    distinct() %>%
+    mutate(dummy = datel) %>%
+    setDT()
+
+  res <-
+    lb.dt[, date.ln := ln.dt[lb.dt, dummy, on = c("vid", "datel"), roll = "nearest"]] %>%
+    as_tibble()
+
+  lb %>%
+    left_join(res,
+              by = c("vid", "datel")) %>%
+    left_join(ln %>% select(vid, date.ln = datel, gid.ln),
+              by = c("vid", "date.ln"))
+
+}
+
+
 # ------------------------------------------------------------------------------
-# A. Logbooks
+# A. Landings gid
+
+ln.base <-
+  mar:::ln_catch(con) %>%
+  mutate(year = year(date)) %>%
+  filter(year %in% YEARS,
+         !is.na(vid), !is.na(date)) %>%
+  select(vid, gid.ln = gid, datel = date) %>%
+  distinct() %>%
+  collect(n = Inf)
+
+
+# ------------------------------------------------------------------------------
+# B. Logbooks
 
 # 1. The base table ------------------------------------------------------------
 #     Common table for all fishing activity. One row here
@@ -28,15 +72,39 @@ lb.base <-
   mar:::lb_base(con) %>%
   filter(year %in% YEARS) %>%
   select(visir, vid, gid, date, datel, hidl,
-         lon1, lat1, sq, ssq, distance)
+         lon1, lat1, lon2, lat2,
+         sq, ssq, distance)
+
+# counting
+N.lb.base <- lb.base %>% select(visir) %>% collect(n = Inf) %>% nrow()
 
 # 2. The catch composition table -----------------------------------------------
 #
 
-lb.base %>%
+lb.catch <-
+  lb.base %>%
   select(visir) %>%
   left_join(mar:::lb_catch(con),
-            by = "visir") %>%
+            by = "visir")
+
+# get the "target species"
+catch.sid.target <-
+  lb.catch %>%
+  collect(n = Inf) %>%
+  group_by(visir) %>%
+  mutate(catcht = sum(catch, na.rm = TRUE),
+         p = catch / catcht) %>%
+  arrange(visir, desc(p), sid) %>%
+  # if multiple maxes, the species "selected" is in the order of 1, 2, 3, ...
+  slice(1) %>%
+  ungroup() %>%
+  select(visir, sid.target = sid, p, catcht)
+
+if(catch.sid.target %>%
+   summarise(n.visir = n_distinct(visir)) == nrow(catch.sid.target)
+) print("test: catch.sid.target has unique visir")
+
+lb.catch %>%
   collect(n = Inf) %>%
   write_rds("data-dump/IS_lb-catch.rds")
 
@@ -66,32 +134,61 @@ lb.detail.static <-
 bind_rows(lb.detail.static %>% mutate(source = "static"),
           lb.detail.mobile %>% mutate(source = "mobile")) %>%
   write_rds("data-dump/IS_lb-detail.rds")
-lb.base %>%
+
+# 5. Join gid from landings and the sid.target from catch to base
+
+lb.base <-
+  lb.base %>%
   collect(n = Inf) %>%
+  match_nearest_date(ln.base)
+
+N.lb.base_added.landings.gid <- nrow(lb.base)
+
+lb.base <-
+  lb.base %>%
+  left_join(catch.sid.target)
+
+# any zeros?
+lb.base %>%
+  filter(is.na(catcht))
+lb.base %>%
+  filter(is.na(sid.target))
+
+
+N.lb.base_added.landings.gid_added.sid.target <- nrow(lb.base)
+
+print("lb.base records")
+print(tibble(id = 1:3,
+             n = c(N.lb.base,
+                   N.lb.base_added.landings.gid,
+                   N.lb.base_added.landings.gid_added.sid.target)))
+
+lb.base %>%
   write_rds("data-dump/IS_lb-base.rds")
 
-# 5. The gear table - a lookup table, containing some description of the gear
+# 6. The gear table - a lookup table, containing some description of the gear
 lb.base %>%
   select(gid) %>%
   distinct() %>%
-  left_join(mar:::lu_gear(con)) %>%
-  collect(n = Inf) %>%
+  left_join(mar:::lu_gear(con) %>%
+              collect(n = Inf)) %>%
   drop_na() %>%
   write_rds("data-dump/IS_lu-gear.rds")
 
 # ------------------------------------------------------------------------------
-# B. Vessel registry
+# C. Vessel registry
 
 lb.base %>%
   select(vid) %>%
   distinct() %>%
-  left_join(mar:::vessel_registry(con, standardize = TRUE),
+  left_join(mar:::vessel_registry(con, standardize = TRUE) %>%
+              collect(n = Inf),
             by = "vid") %>%
   select(vid, name, uid, cs, imo, kw = engine_kw,
          brl, grt, length,
          vlclass = length_class) %>%
   left_join(mar:::stk_mid_vid_2020(con) %>%
-              select(vid, mid, localid, globalid),
+              select(vid, mid, localid, globalid) %>%
+              collect(n = Inf),
             by = "vid") %>%
-  collect(n = Inf) %>%
   write_rds("data-dump/IS_lu-vessel.rds")
