@@ -8,6 +8,8 @@ output:
     toc: yes
     toc_float: yes
     toc_depth: 3
+params:
+  logbook_filename: must_supply
 ---
 
 ```{r setup, include=FALSE}
@@ -38,7 +40,23 @@ land <-
 
 ```{r}
 lgs <- 
-  read_csv('delivery/ICES_LE_ISL.csv')
+  read_csv(params$logbook_filename)
+
+  # some renaming
+  lgs <-
+    lgs %>%
+    rename(
+      ices = ICES_rectangle,
+      unqv = UniqueVessels,
+      vlclass = vessel_length_category,
+      dcf4 = gear_code,
+      dcf6 = LE_MET_level6,
+      fd = fishing_days,
+      kwfd = kw_fishing_days,
+      wgt = totweight,
+      value = totvalue,
+      vms = vms_enabled
+    )
 ```
 
 
@@ -376,7 +394,7 @@ if(any(is.na(lgs$lon))) {
 
 #### **Spatial extent of data submitted by year**
 
-```{r}
+```{r, eval=FALSE}
 lgs %>% 
   group_by(year) %>% 
   summarise(across(c("lon", "lat"), list(min = min, max = max))) %>% 
@@ -546,7 +564,7 @@ d %>%
 
 **INCOMPLETE**
 
-```{r}
+```{r, eval = FALSE}
 d <- 
   lgs %>% 
   #filter(!dcf4 %in% c("OTM", "PS")) %>% 
